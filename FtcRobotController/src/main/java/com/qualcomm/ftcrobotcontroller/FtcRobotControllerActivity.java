@@ -112,7 +112,7 @@ public class FtcRobotControllerActivity extends Activity {
   protected FtcEventLoop eventLoop;
   protected Queue<UsbDevice> receivedUsbAttachmentNotifications;
 
-    public Camera camera;
+  public Camera camera;
 
   protected class RobotRestarter implements Restarter {
 
@@ -205,7 +205,7 @@ public class FtcRobotControllerActivity extends Activity {
     updateUI = new UpdateUI(this, dimmer);
     updateUI.setRestarter(restarter);
     updateUI.setTextViews(textWifiDirectStatus, textRobotStatus,
-        textGamepad, textOpMode, textErrorMessage, textDeviceName);
+            textGamepad, textOpMode, textErrorMessage, textDeviceName);
     callback = updateUI.new Callback();
 
     PreferenceManager.setDefaultValues(this, R.xml.preferences, false);
@@ -381,7 +381,7 @@ public class FtcRobotControllerActivity extends Activity {
   private FileInputStream fileSetup() {
 
     final String filename = Utility.CONFIG_FILES_DIR
-        + utility.getFilenameFromPrefs(R.string.pref_hardware_config_filename, Utility.NO_FILE) + Utility.FILE_EXT;
+            + utility.getFilenameFromPrefs(R.string.pref_hardware_config_filename, Utility.NO_FILE) + Utility.FILE_EXT;
 
     FileInputStream fis;
     try {
@@ -423,46 +423,46 @@ public class FtcRobotControllerActivity extends Activity {
 
   public void showToast(final Toast toast) {
     runOnUiThread(new Runnable() {
-        @Override
-        public void run() {
-            toast.show();
-        }
+      @Override
+      public void run() {
+        toast.show();
+      }
     });
   }
 
 
 
 
-    private Camera openFrontFacingCamera() {
-//        int cameraId = -1;
-//        Camera cam = null;
-//        int numberOfCameras = Camera.getNumberOfCameras();
-//        for (int i = 0; i < numberOfCameras; i++) {
-//            Camera.CameraInfo info = new Camera.CameraInfo();
-//            Camera.getCameraInfo(i, info);
-//            if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
-//                cameraId = i;
-//                break;
-//            }
-//        }
-//        try {
-//            cam = Camera.open(cameraId);
-//        } catch (Exception e) {
-//
-//        }
-//        return cam;
+  private Camera openFrontFacingCamera() {
+    //        int cameraId = -1;
+    //        Camera cam = null;
+    //        int numberOfCameras = Camera.getNumberOfCameras();
+    //        for (int i = 0; i < numberOfCameras; i++) {
+    //            Camera.CameraInfo info = new Camera.CameraInfo();
+    //            Camera.getCameraInfo(i, info);
+    //            if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+    //                cameraId = i;
+    //                break;
+    //            }
+    //        }
+    //        try {
+    //            cam = Camera.open(cameraId);
+    //        } catch (Exception e) {
+    //
+    //        }
+    //        return cam;
 
-        return Camera.open();
-    }
+    return Camera.open();
+  }
 
-    public void initPreview(final Camera camera, final VisionGather context, final Camera.PreviewCallback previewCallback) {
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                context.preview = new CameraPreview(FtcRobotControllerActivity.this, camera, previewCallback);
-                FrameLayout previewLayout = (FrameLayout) findViewById(R.id.previewLayout);
-                previewLayout.addView(context.preview);
-            }
-        });
-    }
+  public void initPreview(final Camera camera, final VisionGather context, final Camera.PreviewCallback previewCallback) {
+    runOnUiThread(new Runnable() {
+      @Override
+      public void run() {
+        context.preview = new CameraPreview(FtcRobotControllerActivity.this, camera, previewCallback);
+        FrameLayout previewLayout = (FrameLayout) findViewById(R.id.previewLayout);
+        previewLayout.addView(context.preview);
+      }
+    });
+  }
 }
