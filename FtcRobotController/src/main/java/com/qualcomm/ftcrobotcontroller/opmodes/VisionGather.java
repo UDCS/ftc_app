@@ -6,7 +6,7 @@ import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.Range;
 
 
-import org.deeplearning4j.nn.multilayer.MultiLayerNetwork;
+//import org.deeplearning4j.nn.multilayer.MultiLayerNetwork;
 
 
 
@@ -71,7 +71,7 @@ public class VisionGather extends LinearOpMode{
      */
     private void doSingleJoystickDrive() {
         float speed = -gamepad1.left_stick_y;
-        float turn  = gamepad1.left_stick_x / 5;
+        float turn  = gamepad1.right_stick_x / 5;
         float l_left_drive_power
                 = (float) scale_motor_power(speed - turn);
         float l_right_drive_power
@@ -145,8 +145,8 @@ public class VisionGather extends LinearOpMode{
 
     /**
      *
-     */
+     *
     void processModel(MultiLayerNetwork model){
 
-    }
+    }*/
 }
