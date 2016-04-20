@@ -1,9 +1,25 @@
 package com.qualcomm.ftcrobotcontroller.opmodes;
 
+import android.graphics.Bitmap;
+import android.graphics.YuvImage;
+import android.hardware.Camera;
+import android.os.AsyncTask;
+import android.os.Environment;
+import android.util.Log;
+
+import com.qualcomm.ftcrobotcontroller.CameraPreview;
+import com.qualcomm.ftcrobotcontroller.FtcRobotControllerActivity;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.Range;
+
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 
 import org.deeplearning4j.nn.multilayer.MultiLayerNetwork;
 
@@ -17,6 +33,20 @@ public class VisionGather extends LinearOpMode{
     DcMotor Lmotor, Rmotor;
     Servo  ServoA1, ServoA2;
 
+    long lastTime;
+    long curTime;
+    int cameraTimer;
+
+    /* Camera fields */
+    private Camera camera;
+    public CameraPreview preview;
+    public Bitmap image;
+    private int width;
+    private int height;
+    private YuvImage yuvImage = null;
+    private int looped = 0;
+    private String data;
+
     @Override
     public void runOpMode() throws InterruptedException{
         Lmotor = hardwareMap.dcMotor.get("m1");
@@ -26,10 +56,28 @@ public class VisionGather extends LinearOpMode{
 
         Rmotor.setDirection(DcMotor.Direction.REVERSE);
 
+/* Camera stuff */
+        camera = ((FtcRobotControllerActivity)hardwareMap.appContext).camera;
+        camera.setPreviewCallback(previewCallback);
+
+
+        Camera.Parameters parameters = camera.getParameters();
+        data = parameters.flatten();
+
+        ((FtcRobotControllerActivity) hardwareMap.appContext).initPreview(camera, this, previewCallback);
+
 
 
         waitForStart();
         while(opModeIsActive()){
+            updateTimer();
+            telemetry.addData("Time:", "Updated, " + cameraTimer);
+            if(cameraTimer > 10000) {
+                telemetry.addData("Camera:", "Taking pic");
+                CameraLoop();
+                cameraTimer = 0;
+            }
+
             doSingleJoystickDrive();
             ServoA2.setPosition(0.5);
 
@@ -140,10 +188,105 @@ public class VisionGather extends LinearOpMode{
 
     }
 
+    private void updateTimer() {
+        lastTime = curTime;
+        curTime = System.currentTimeMillis();
+        cameraTimer += curTime - lastTime;
+    }
+
+
+
+    /* Camera Stuff */
+
+
+    private Camera.PreviewCallback previewCallback = new Camera.PreviewCallback() {
+        public void onPreviewFrame(byte[] data, Camera camera)
+        {
+//            Camera.Parameters parameters = camera.getParameters();
+//            width = parameters.getPreviewSize().width;
+//            height = parameters.getPreviewSize().height;
+//            yuvImage = new YuvImage(data, ImageFormat.NV21, width, height, null);
+//            looped += 1;
+        }
+    };
+
+//private void convertImage() {
+//    ByteArrayOutputStream out = new ByteArrayOutputStream();
+//    yuvImage.compressToJpeg(new Rect(0, 0, width, height), 0, out);
+//    byte[] imageBytes = out.toByteArray();
+//    image = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.length);
+//}
+
+
+    public void CameraLoop() {
+//      camera.takePicture(shutterCallback, rawCallback, jpegCallback);
+
+        telemetry.addData("Image:", "Image taken");
+
+//    telemetry.addData("Image", Integer.toString(looped) + " images taken");
+        Log.d("DEBUG:", data);
+    }
+
+    Camera.ShutterCallback shutterCallback = new Camera.ShutterCallback() {
+        public void onShutter() {
+            //			 Log.d(TAG, "onShutter'd");
+        }
+    };
+
+    Camera.PictureCallback rawCallback = new Camera.PictureCallback() {
+        public void onPictureTaken(byte[] data, Camera camera) {
+            //			 Log.d(TAG, "onPictureTaken - raw");
+        }
+    };
+
+    Camera.PictureCallback jpegCallback = new Camera.PictureCallback() {
+        public void onPictureTaken(byte[] data, Camera camera) {
+            new SaveImageTask().execute(data);
+//            resetCam();
+//            Log.d("VisionGather", "onPictureTaken - jpeg");
+        }
+    };
+
+    private class SaveImageTask extends AsyncTask<byte[], Void, Void> {
+
+        @Override
+        protected Void doInBackground(byte[]... data) {
+            FileOutputStream outStream = null;
+
+            // Write to SD Card
+            try {
+//				File sdCard = Environment.getExternalStorageDirectory();
+//				File dir = new File (sdCard.getAbsolutePath() + "/camtest");
+                File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "DataCollector");
+                dir.mkdirs();
+
+                String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
+                String fileName = String.format("%s.jpg", timeStamp);
+                File outFile = new File(dir, fileName);
+
+                outStream = new FileOutputStream(outFile);
+                outStream.write(data[0]);
+                outStream.flush();
+                outStream.close();
+
+                telemetry.addData("Camera:", "onPictureTaken - wrote bytes: " + data.length + " to " + outFile.getAbsolutePath());
+                Log.d("VisionGather", "onPictureTaken - wrote bytes: " + data.length + " to " + outFile.getAbsolutePath());
+            } catch (FileNotFoundException e) {
+                e.printStackTrace();
+            } catch (IOException e) {
+                e.printStackTrace();
+            } finally {
+            }
+            return null;
+        }
+
+    }
+
     /**
      *
      */
     void processModel(MultiLayerNetwork model){
 
-    }
+	}
+
 }
