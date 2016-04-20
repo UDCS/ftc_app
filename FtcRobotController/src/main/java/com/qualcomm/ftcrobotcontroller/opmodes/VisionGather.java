@@ -5,10 +5,7 @@ import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.Range;
 
-
-//import org.deeplearning4j.nn.multilayer.MultiLayerNetwork;
-
-
+import org.deeplearning4j.nn.multilayer.MultiLayerNetwork;
 
 public class VisionGather extends LinearOpMode{
 
@@ -145,8 +142,8 @@ public class VisionGather extends LinearOpMode{
 
     /**
      *
-     *
+     */
     void processModel(MultiLayerNetwork model){
 
-    }*/
+    }
 }
