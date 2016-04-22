@@ -1,5 +1,6 @@
 package com.qualcomm.ftcrobotcontroller.opmodes;
 
+import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.YuvImage;
 import android.hardware.Camera;
@@ -9,6 +10,7 @@ import android.util.Log;
 
 import com.qualcomm.ftcrobotcontroller.CameraPreview;
 import com.qualcomm.ftcrobotcontroller.FtcRobotControllerActivity;
+import com.qualcomm.ftcrobotcontroller.R;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.Servo;
@@ -19,9 +21,25 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
+import java.util.Arrays;
 import java.util.Date;
 
+import java.io.*;
+import java.util.List;
+import java.util.Scanner;
+
+import org.apache.commons.io.FileUtils;
+import org.canova.api.records.reader.RecordReader;
+import org.canova.api.split.FileSplit;
+import org.canova.image.recordreader.ImageRecordReader;
+import org.deeplearning4j.datasets.canova.RecordReaderDataSetIterator;
+import org.deeplearning4j.datasets.iterator.DataSetIterator;
+import org.deeplearning4j.eval.Evaluation;
+import org.deeplearning4j.nn.conf.*;
 import org.deeplearning4j.nn.multilayer.MultiLayerNetwork;
+import org.nd4j.linalg.api.ndarray.INDArray;
+import org.nd4j.linalg.dataset.DataSet;
+import org.nd4j.linalg.factory.Nd4j;
 
 public class VisionGather extends LinearOpMode{
 
@@ -285,8 +303,68 @@ public class VisionGather extends LinearOpMode{
     /**
      *
      */
-    void processModel(MultiLayerNetwork model){
+    void processModel(MultiLayerNetwork model, String path)
+            throws IOException, InterruptedException {
+        //create array of strings called labels, read from the subdirectories of the directory below
+        List<String> labels = Arrays.asList("circle", "fillCircle", "fillSquare", "line", "square");
 
+        System.out.println("Predicting");
+
+		/*
+		//traverse dataset to get each label
+		List<String> labels = new ArrayList<>();
+		for(File f : new File(path).listFiles()) {
+			labels.add(f.getName());
+		}
+		 */
+
+        // Instantiating RecordReader. Specify height and width of images.
+        RecordReader recordReader = new ImageRecordReader(28, 28, true, labels);
+
+        // Point to data path.
+        recordReader.initialize(new FileSplit(new File(path)));
+        DataSetIterator iter = new RecordReaderDataSetIterator(recordReader, 784, labels.size());
+
+        Resources res = hardwareMap.appContext.getResources();
+
+        //Load network configuration from disk, if needed
+        if(model == null){
+            MultiLayerConfiguration confFromJson = MultiLayerConfiguration.fromJson(
+                    resToString(res.openRawResource(R.raw.neuralnetconf)));
+
+            //Load parameters from disk:
+            INDArray newParams;
+            DataInputStream dis = null;
+            try {
+                dis = new DataInputStream(res.openRawResource(R.raw.neuralnetcoeff));
+                newParams = Nd4j.read(dis);
+            } finally {
+                if (dis != null) {
+                    dis.close();
+                }
+            }
+
+            //Create a MultiLayerNetwork from the saved configuration and parameters
+            model = new MultiLayerNetwork(confFromJson);
+            model.init();
+            model.setParameters(newParams);
+        }
+
+        //iter = new MnistDataSetIterator(64, false, 12345);
+
+        Evaluation eval = new Evaluation();
+        while(iter.hasNext()){
+            DataSet next = iter.next();
+            next.normalize();
+            INDArray predict = model.output(next.getFeatureMatrix());
+            eval.eval(next.getLabels(), predict);
+        }
+
+        System.out.println(eval.stats());
 	}
+
+    private String resToString(InputStream in) {
+        return new Scanner(in).useDelimiter("\\A").next();
+    }
 
 }
