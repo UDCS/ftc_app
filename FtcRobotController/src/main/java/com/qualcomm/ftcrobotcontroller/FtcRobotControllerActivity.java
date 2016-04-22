@@ -46,6 +46,7 @@ import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.preference.PreferenceManager;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -53,6 +54,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -78,6 +80,12 @@ import java.io.FileNotFoundException;
 import java.io.Serializable;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
+
+
+import org.opencv.android.BaseLoaderCallback;
+import org.opencv.android.LoaderCallbackInterface;
+import org.opencv.android.OpenCVLoader;
+
 
 public class FtcRobotControllerActivity extends Activity {
 
@@ -113,6 +121,7 @@ public class FtcRobotControllerActivity extends Activity {
   protected Queue<UsbDevice> receivedUsbAttachmentNotifications;
 
   public Camera camera;
+  public ImageView cvLayout;
 
   protected class RobotRestarter implements Restarter {
 
@@ -206,6 +215,7 @@ public class FtcRobotControllerActivity extends Activity {
     updateUI.setRestarter(restarter);
     updateUI.setTextViews(textWifiDirectStatus, textRobotStatus,
             textGamepad, textOpMode, textErrorMessage, textDeviceName);
+
     callback = updateUI.new Callback();
 
     PreferenceManager.setDefaultValues(this, R.xml.preferences, false);
@@ -217,6 +227,9 @@ public class FtcRobotControllerActivity extends Activity {
     hittingMenuButtonBrightensScreen();
 
     if (USE_DEVICE_EMULATION) { HardwareFactory.enableDeviceEmulation(); }
+
+    // Grab our image view for displaying OpenCV results
+    cvLayout = (ImageView) findViewById(R.id.cvLayout);
   }
 
   @Override
@@ -244,9 +257,30 @@ public class FtcRobotControllerActivity extends Activity {
     wifiLock.acquire();
   }
 
+
+
+	private BaseLoaderCallback mLoaderCallback = new BaseLoaderCallback(this) {
+		@Override
+		public void onManagerConnected(int status) {
+			switch (status) {
+			case LoaderCallbackInterface.SUCCESS: {
+				Log.i("OpenCV Stuff", "OpenCV loaded successfully");
+			}
+				break;
+			default: {
+				super.onManagerConnected(status);
+			}
+				break;
+			}
+		}
+	};
+
+
+
   @Override
   protected void onResume() {
     super.onResume();
+    OpenCVLoader.initAsync(OpenCVLoader.OPENCV_VERSION_3_1_0, this, mLoaderCallback);
   }
 
   @Override
