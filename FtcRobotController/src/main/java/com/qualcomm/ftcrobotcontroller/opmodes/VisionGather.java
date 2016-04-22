@@ -45,10 +45,7 @@ import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 
-
-//import org.deeplearning4j.nn.multilayer.MultiLayerNetwork;
-
-
+import org.deeplearning4j.nn.multilayer.MultiLayerNetwork;
 
 public class VisionGather extends LinearOpMode{
 
@@ -189,7 +186,7 @@ public class VisionGather extends LinearOpMode{
         int left = turnLeft;
         telemetry.addData("LEFT:", left + " and " + turnLeft);
 
-        float speed = 0.5f;
+        float speed = -0.5f;
         float turn  = -left / 480.0f;
         float l_left_drive_power
                 = (float) scale_motor_power(speed - turn);
@@ -516,7 +513,6 @@ public class VisionGather extends LinearOpMode{
 //            Log.d("VisionGather", "onPictureTaken - jpeg");
         }
     };
-}
 
 /*
 
@@ -583,3 +579,12 @@ public static class OpenCVProcess extends AsyncTask<Void, Void, Void> {
             telemetry.addData("maxj", maxj);
             //telemetry.addData("r", Math.random());
  */
+
+    /**
+     *
+     */
+    void processModel(MultiLayerNetwork model){
+
+	}
+
+}
