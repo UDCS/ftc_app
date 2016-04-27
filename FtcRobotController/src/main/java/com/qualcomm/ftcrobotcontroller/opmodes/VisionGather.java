@@ -21,6 +21,10 @@ import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.Range;
 
+import org.apache.commons.io.FileUtils;
+import org.deeplearning4j.nn.conf.MultiLayerConfiguration;
+import org.nd4j.linalg.api.ndarray.INDArray;
+import org.nd4j.linalg.factory.Nd4j;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
@@ -35,7 +39,9 @@ import org.opencv.android.Utils;
 import org.opencv.video.Video;
 
 import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -46,14 +52,16 @@ import java.util.Date;
 import java.util.List;
 
 import org.deeplearning4j.nn.multilayer.MultiLayerNetwork;
+import org.nd4j.linalg.factory.Nd4j;
 
 public class VisionGather extends LinearOpMode{
 
     final static int LOOKLEFT = 0;
     final static int LOOKFORWARD = 1;
     final static int LOOKRIGHT = 2;
-    final static int DONERIGHT = 3;
-    final static int DONELEFT = 4;
+    final static int TURNING = 3;
+    final static int NOT_TURNING = 4;
+    static int turnState = 4;
     static int lookState = 0;
 
     DcMotor Lmotor, Rmotor;
@@ -87,7 +95,7 @@ public class VisionGather extends LinearOpMode{
     static long nextTime;
     static double[] globalSum;
 
-    static int leftVal;
+    static int targetXval;
 
     @Override
     public void runOpMode() throws InterruptedException{
@@ -96,7 +104,7 @@ public class VisionGather extends LinearOpMode{
         ServoA1 = hardwareMap.servo.get("s1");
         ServoA2 = hardwareMap.servo.get("s2");
 
-        Rmotor.setDirection(DcMotor.Direction.REVERSE);
+        Lmotor.setDirection(DcMotor.Direction.REVERSE);
 
         /* Camera stuff */
         camera = Camera.open(0);
@@ -122,32 +130,9 @@ public class VisionGather extends LinearOpMode{
         while(opModeIsActive()){
 
 //            doSingleJoystickDrive();
-            doGoToTheLightDrive(leftVal);
+            doGoToTheLightDrive();
             ServoA2.setPosition(0.6);
-
-            switch(lookState){
-                case LOOKLEFT:
-                    ServoA1.setPosition(0.55);
-                    break;
-
-                case DONELEFT:
-                    if(System.currentTimeMillis() > nextTime)
-                        lookState = LOOKRIGHT;
-                    break;
-
-                case LOOKRIGHT:
-                    ServoA1.setPosition(0.55);
-                    break;
-
-                case DONERIGHT:
-                    if(System.currentTimeMillis() > nextTime)
-                        lookState = LOOKLEFT;
-                    break;
-
-                case LOOKFORWARD:
-                    ServoA1.setPosition(0.55);
-                    break;
-            }
+            ServoA1.setPosition(0.55);
 
             if(gamepad1.x)
                 lookState = LOOKLEFT;
@@ -159,7 +144,7 @@ public class VisionGather extends LinearOpMode{
             telemetry.addData("left", globalSum[0]);
             telemetry.addData("middle", globalSum[1]);
             telemetry.addData("right", globalSum[2]);
-            telemetry.addData("preference", largestVal(globalSum[0], globalSum[1], globalSum[2]));
+            telemetry.addData("longestLines", largestVal(globalSum[0], globalSum[1], globalSum[2]));
 
             waitForNextHardwareCycle();
 
@@ -181,19 +166,17 @@ public class VisionGather extends LinearOpMode{
     /**
      * Mode for using one joystick
      */
-    private void doGoToTheLightDrive(int turnLeft) {
+    private void doGoToTheLightDrive() {
+        telemetry.addData("targetXval:", "" + targetXval);
 
-        int left = turnLeft;
-        telemetry.addData("LEFT:", left + " and " + turnLeft);
-
-        float speed = -0.5f;
-        float turn  = -left / 480.0f;
+        float speed = 0.3f;
+        float rightBias  = (targetXval - 80.0f)/600.0f;
         float l_left_drive_power
-                = (float) scale_motor_power(speed - turn);
+                = (float) scale_motor_power(speed + rightBias);
         float l_right_drive_power
-                = (float) scale_motor_power(speed + turn);
-        telemetry.addData("s, t = ", "" + speed + ", " + turn);
-
+                = (float) scale_motor_power(speed - rightBias);
+        //telemetry.addData("s, t = ", "" + speed + ", " + turn);
+        telemetry.addData("Powers: ", "" + l_left_drive_power + ":" + l_right_drive_power);
         set_drive_power(l_left_drive_power, l_right_drive_power);
 
 
@@ -240,8 +223,8 @@ public class VisionGather extends LinearOpMode{
             cvColorImage   = new Mat(240, 160, CvType.CV_8UC4);
             cvLastImage   = new Mat(240, 160, CvType.CV_8UC1);
             cvWorkingImage   = new Mat(240, 160, CvType.CV_8UC4);
-            toPoints   = initPoints(cvWorkingImage.width(), cvWorkingImage.height(), 10);
-            fromPoints = initPoints(cvWorkingImage.width(), cvWorkingImage.height(), 20);
+            toPoints   = initPoints(cvWorkingImage.width(), cvWorkingImage.height(), 40);
+            fromPoints = initPoints(cvWorkingImage.width(), cvWorkingImage.height(), 40);
 
             // Build a kernel
             int N = 3;
@@ -268,7 +251,7 @@ public class VisionGather extends LinearOpMode{
         @Override
         protected Void doInBackground(Void... params) {
             // Orient the image properly
-            if(CVImageProcessingFlag == true || lookState == DONELEFT || lookState == DONERIGHT) {
+            if(CVImageProcessingFlag == true) {
                 cvColorImage = null;
                 return null;
             }
@@ -277,6 +260,7 @@ public class VisionGather extends LinearOpMode{
             Imgproc.cvtColor(cvOrigImage, cvBWImage, Imgproc.COLOR_BGR2GRAY);
             Imgproc.equalizeHist(cvBWImage, cvBWImage);
 
+            // Rotate the image
             Core.transpose(cvBWImage, cvBWImage);
             Core.flip(cvBWImage, cvBWImage, 1);
 
@@ -298,16 +282,17 @@ public class VisionGather extends LinearOpMode{
                 bins.add(new ArrayList<Integer>());
 
             for(int i = 0; i < fpArray.length; i++){
-                if(b[i] == 1 && dist(fpArray[i], tpArray[i]) < 20) {
+                double distance = dist(fpArray[i], tpArray[i]);
+                if(b[i] == 1 && distance > -1 && distance < 30) {
                     // draw the segment to the screen
                     Imgproc.line(cvWorkingImage, fpArray[i], tpArray[i], new Scalar(255, 0, 255));
                     // Place the segment into the appropriate bin
                     int binNumber = (int)(fpArray[i].x * numBins) / cvWorkingImage.cols();
-                    bins.get(binNumber).add((int)dist(fpArray[i], tpArray[i]));
+                    bins.get(binNumber).add((int)xdist(fpArray[i], tpArray[i]));
                 }
             }
 
-            // Now compute how to turn based on the bin
+            // Now compute how to turn based on the bins
             int maxi = -1;
             double maxSum = -1;
             for(int i = 0; i < numBins; i++) {
@@ -319,23 +304,29 @@ public class VisionGather extends LinearOpMode{
                 if (sum > 0)
                     sum /= numEntries;
                 globalSum[i] = sum;
-
-                if (sum > maxi) {
-                    maxSum = sum;
-                    maxi = i;
-                }
             }
 
-            leftVal = 80 + (1-maxi) * 60;
-            Log.d("leftVal", "" + leftVal);
+            // Now set leftVal for turning. 80 = straight, less = left (maybe...)
+            targetXval = 80;
+
+            if(turnState == NOT_TURNING) {
+                double factorThresh = 1.2;
+                double minThresh = 2;
+                if (globalSum[0] > minThresh && globalSum[0] > factorThresh * globalSum[1] && globalSum[0] > factorThresh * globalSum[2])
+                    targetXval = 140;
+                if (globalSum[2] > minThresh && globalSum[2] > factorThresh * globalSum[1] && globalSum[2] > factorThresh * globalSum[0])
+                    targetXval = 20;
+            }
+
+            if(targetXval != 80)
+                turnState = TURNING;
+            else
+                turnState = NOT_TURNING;
+
+            Log.d("leftVal", "" + targetXval);
 
             cvColorImage = cvWorkingImage;
-
             cvLastImage = cvBWImage.clone();
-
-            if(lookState == LOOKLEFT) lookState = DONELEFT;
-            if(lookState == LOOKRIGHT) lookState = DONERIGHT;
-            nextTime = System.currentTimeMillis() + 500;
 
             CVImageProcessingFlag = false;
 
@@ -343,8 +334,12 @@ public class VisionGather extends LinearOpMode{
         }
     }
 
+    private static double xdist(Point p1, Point p2){
+        return Math.abs(p1.x - p2.x);
+    }
+
     private static double dist(Point p1, Point p2){
-        return Math.sqrt((p1.x - p2.x)*(p1.x - p2.x) + (p1.y - p2.y)*(p1.y - p2.y));
+        return Math.sqrt((p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y));
     }
 
     /**
@@ -584,7 +579,31 @@ public static class OpenCVProcess extends AsyncTask<Void, Void, Void> {
      *
      */
     void processModel(MultiLayerNetwork model){
+        MultiLayerConfiguration confFromJson = null;
+        try {
+            confFromJson = MultiLayerConfiguration.fromJson(FileUtils.
+                    readFileToString(new File("/home/hochberg/vision2014/NeuralNets/conf.json")));
+        } catch (IOException e) {
+            Log.e("processModel", "Could not open file");
+        }
 
-	}
+
+
+        //Load parameters from disk:
+        INDArray newParams = null;
+        try {
+            DataInputStream dis = new DataInputStream(new FileInputStream("/home/hochberg/vision2014/NeuralNets/coefficients.bin"));
+            newParams = org.nd4j.linalg.factory.Nd4j.read(dis);
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        //Create a MultiLayerNetwork from the saved configuration and parameters
+        model = new MultiLayerNetwork(confFromJson);
+        model.init();
+        model.setParameters(newParams);
+    }
 
 }
