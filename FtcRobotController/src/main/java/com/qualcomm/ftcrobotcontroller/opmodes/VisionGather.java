@@ -126,6 +126,30 @@ public class VisionGather extends LinearOpMode{
         set_drive_power(l_left_drive_power, l_right_drive_power);
     }
 
+    private void doNeuralNetworkDrive(int directions){
+
+        float speed = 0f;
+        float turn  = 0f;
+
+
+        if(directions == STRAIGHT)
+            speed = -0.25f;
+        else if (directions == TURN_RIGHT) {
+            speed = -0.1f;
+            turn = 0.2f;
+        }else if (directions == TURN_LEFT) {
+            speed = -0.1f;
+            turn = -0.2f;
+        }
+        float l_left_drive_power
+                = (float) scale_motor_power(speed - turn);
+        float l_right_drive_power
+                = (float) scale_motor_power(speed + turn);
+        telemetry.addData("s, t = ", "" + speed + ", " + turn);
+
+        set_drive_power(l_left_drive_power, l_right_drive_power);
+    }
+
 
 
     double scale_motor_power (double p_power)
