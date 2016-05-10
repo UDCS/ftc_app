@@ -259,21 +259,21 @@ public class FtcRobotControllerActivity extends Activity {
 
 
 
-	private BaseLoaderCallback mLoaderCallback = new BaseLoaderCallback(this) {
-		@Override
-		public void onManagerConnected(int status) {
-			switch (status) {
-			case LoaderCallbackInterface.SUCCESS: {
-				Log.i("OpenCV Stuff", "OpenCV loaded successfully");
-			}
-				break;
-			default: {
-				super.onManagerConnected(status);
-			}
-				break;
-			}
-		}
-	};
+  private BaseLoaderCallback mLoaderCallback = new BaseLoaderCallback(this) {
+    @Override
+    public void onManagerConnected(int status) {
+      switch (status) {
+        case LoaderCallbackInterface.SUCCESS: {
+          Log.i("OpenCV Stuff", "OpenCV loaded successfully");
+        }
+        break;
+        default: {
+          super.onManagerConnected(status);
+        }
+        break;
+      }
+    }
+  };
 
 
 
@@ -286,11 +286,6 @@ public class FtcRobotControllerActivity extends Activity {
   @Override
   public void onPause() {
     super.onPause();
-    if (camera != null) {
-        camera.stopPreview();
-        camera.release();
-        camera = null;
-    }
   }
 
   @Override

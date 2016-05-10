@@ -22,7 +22,6 @@ import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.Range;
 
-
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
@@ -105,7 +104,7 @@ public class VisionGather extends LinearOpMode{
     static double[] globalSum;
 
     /* Adjustable fields */
-    float predictAdjust = 3.0f;
+    float predictAdjust = 0.0f;
     float ratio = 10f;
     static enum Field {
         PREDICTADJUST, RATIO, MEMORY
@@ -203,7 +202,6 @@ public class VisionGather extends LinearOpMode{
 
             telemetry.addData("current field:", curField.toString());
 
-
             waitForNextHardwareCycle();
 
         }
@@ -234,10 +232,6 @@ public class VisionGather extends LinearOpMode{
         //telemetry.addData("s, t = ", "" + speed + ", " + turn);
         telemetry.addData("Powers: ", "" + l_left_drive_power + " : " + l_right_drive_power);
         set_drive_power(l_left_drive_power, l_right_drive_power);
-
-
-
-
     }
 
 
@@ -310,7 +304,6 @@ public class VisionGather extends LinearOpMode{
         @Override
         protected Void doInBackground(Void... params) {
             // Orient the image properly
-
             Imgproc.cvtColor(cvOrigImage, cvBWImage, Imgproc.COLOR_BGR2GRAY);
             Imgproc.equalizeHist(cvBWImage, cvBWImage);
 
@@ -364,6 +357,8 @@ public class VisionGather extends LinearOpMode{
                     predictionQueue.removeFirst();
                 }
             }
+
+
             return null;
         }
     }
@@ -789,6 +784,7 @@ public static class OpenCVProcess extends AsyncTask<Void, Void, Void> {
 
     /**
      *
+     <<<<<<< HEAD
      *
 
      void processModel(){
