@@ -1,5 +1,6 @@
 package com.qualcomm.ftcrobotcontroller.opmodes;
 
+import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.ImageFormat;
@@ -21,6 +22,7 @@ import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.Range;
 
+
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
@@ -34,26 +36,38 @@ import org.opencv.imgproc.Imgproc;
 import org.opencv.android.Utils;
 import org.opencv.video.Video;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.FileReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.io.StringWriter;
+import java.io.UnsupportedEncodingException;
+import java.io.Writer;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
-
-import org.deeplearning4j.nn.multilayer.MultiLayerNetwork;
+import java.util.Queue;
 
 public class VisionGather extends LinearOpMode{
 
     final static int LOOKLEFT = 0;
     final static int LOOKFORWARD = 1;
     final static int LOOKRIGHT = 2;
-    final static int DONERIGHT = 3;
-    final static int DONELEFT = 4;
+    final static int TURNING = 3;
+    final static int NOT_TURNING = 4;
+    static int turnState = 4;
     static int lookState = 0;
 
     DcMotor Lmotor, Rmotor;
@@ -69,6 +83,12 @@ public class VisionGather extends LinearOpMode{
     private int looped = 0;
     private String data;
 
+    // Neural Net fields
+    MyModel model = null;
+    float predictionHistory = 3.0f;
+    float MEMORY = 0.3f;
+    int   QSIZE  = 11;
+    LinkedList<Integer> predictionQueue;
 
     static Mat cvOrigImage;
     static Mat cvBWImage;
@@ -81,13 +101,18 @@ public class VisionGather extends LinearOpMode{
     static MatOfPoint2f fromPoints; // for flow
     static Mat cvLastImage;               // for flow
     static Boolean CVImageProcessingFlag;
-    static long lastTime;   // last time points were grabbed.
-    static long currentTime;   // time when points were grabbed.
-    static int FLOW_STATE;
     static long nextTime;
     static double[] globalSum;
 
-    static int leftVal;
+    /* Adjustable fields */
+    float predictAdjust = 3.0f;
+    float ratio = 10f;
+    static enum Field {
+        PREDICTADJUST, RATIO, MEMORY
+    }
+    Field curField = Field.MEMORY;
+    boolean pressed = false;
+
 
     @Override
     public void runOpMode() throws InterruptedException{
@@ -96,7 +121,7 @@ public class VisionGather extends LinearOpMode{
         ServoA1 = hardwareMap.servo.get("s1");
         ServoA2 = hardwareMap.servo.get("s2");
 
-        Rmotor.setDirection(DcMotor.Direction.REVERSE);
+        Lmotor.setDirection(DcMotor.Direction.REVERSE);
 
         /* Camera stuff */
         camera = Camera.open(0);
@@ -105,11 +130,13 @@ public class VisionGather extends LinearOpMode{
         camera.setDisplayOrientation(90);
         Camera.Parameters parameters = camera.getParameters();
         parameters.setPreviewSize(240, 160);
+        //parameters.setPreviewSize(1280, 720);
         List<Camera.Size> x = parameters.getSupportedPreviewSizes();
         List<Integer> y = parameters.getSupportedPreviewFormats();
         camera.setParameters(parameters);
         data = parameters.flatten();
 
+        // Set up camera and OpenCV
         ((FtcRobotControllerActivity) hardwareMap.appContext).initPreview(camera, this, previewCallback);
         cvLayout = ((FtcRobotControllerActivity) hardwareMap.appContext).cvLayout;
         new OpenCVSetup().execute();
@@ -118,83 +145,97 @@ public class VisionGather extends LinearOpMode{
         nextTime = System.currentTimeMillis();
         globalSum = new double[3];
 
+        // Set up the neural network
+        model = new MyModel(new int[] {160, 600, 3000, 6});
+        model.read(R.raw.coeffplain);
+        model.setMeanAndDev(R.raw.meanvarcsv);
+        predictionQueue = new LinkedList<Integer>();
+
         waitForStart();
         while(opModeIsActive()){
 
-//            doSingleJoystickDrive();
-            doGoToTheLightDrive(leftVal);
+            //doSingleJoystickDrive();
+            //doGoToTheLightDrive();
+            doNeuralNetDrive();
             ServoA2.setPosition(0.6);
+            ServoA1.setPosition(0.55);
 
-            switch(lookState){
-                case LOOKLEFT:
-                    ServoA1.setPosition(0.55);
+            if(gamepad1.x)
+//                lookState = LOOKLEFT;
+                curField = Field.MEMORY;
+            if(gamepad1.y)
+//                lookState = LOOKFORWARD;
+                curField = Field.RATIO;
+            if(gamepad1.b)
+                curField = Field.PREDICTADJUST;
+//                lookState = LOOKRIGHT;
+
+            int inc = 0;
+            if(!pressed) {
+                if (gamepad1.dpad_up) {
+                    inc = 1;
+                    pressed = true;
+                }else if (gamepad1.dpad_down) {
+                    inc = -1;
+                    pressed = true;
+                }
+            } else
+            if(!gamepad1.dpad_up && !gamepad1.dpad_down)
+                pressed = false;
+
+            switch(curField){
+                case MEMORY:
+                    MEMORY += inc * 0.05f;
                     break;
-
-                case DONELEFT:
-                    if(System.currentTimeMillis() > nextTime)
-                        lookState = LOOKRIGHT;
+                case RATIO:
+                    ratio += inc * 1f;
                     break;
-
-                case LOOKRIGHT:
-                    ServoA1.setPosition(0.55);
+                case PREDICTADJUST:
+                    predictAdjust += inc * 0.1f;
                     break;
-
-                case DONERIGHT:
-                    if(System.currentTimeMillis() > nextTime)
-                        lookState = LOOKLEFT;
-                    break;
-
-                case LOOKFORWARD:
-                    ServoA1.setPosition(0.55);
+                default:
                     break;
             }
 
-            if(gamepad1.x)
-                lookState = LOOKLEFT;
-            if(gamepad1.y)
-                lookState = LOOKFORWARD;
-            if(gamepad1.b)
-                lookState = LOOKRIGHT;
+            telemetry.addData("memory:", MEMORY);
+            telemetry.addData("ratio:", ratio);
+            telemetry.addData("predictAdjust:", predictAdjust);
 
-            telemetry.addData("left", globalSum[0]);
-            telemetry.addData("middle", globalSum[1]);
-            telemetry.addData("right", globalSum[2]);
-            telemetry.addData("preference", largestVal(globalSum[0], globalSum[1], globalSum[2]));
+            telemetry.addData("current field:", curField.toString());
+
 
             waitForNextHardwareCycle();
 
         }
         Lmotor.setPower(0);
         Rmotor.setPower(0);
-    }
+        if (camera != null) {
+            camera.stopPreview();
+            camera.release();
+            camera = null;
+        }
 
-    private String largestVal(double l, double c, double r){
-        if(l > c && l > r){
-            return "left";
-        }else if(r > c)
-            return "right";
-        else
-            return "center";
     }
 
 
     /**
      * Mode for using one joystick
      */
-    private void doGoToTheLightDrive(int turnLeft) {
+    private void doNeuralNetDrive() {
+        telemetry.addData("history:", "" + predictionHistory);
 
-        int left = turnLeft;
-        telemetry.addData("LEFT:", left + " and " + turnLeft);
-
-        float speed = -0.5f;
-        float turn  = -left / 480.0f;
-        float l_left_drive_power
-                = (float) scale_motor_power(speed - turn);
-        float l_right_drive_power
-                = (float) scale_motor_power(speed + turn);
-        telemetry.addData("s, t = ", "" + speed + ", " + turn);
-
+        float speed = 0.3f;
+        float rightBias  = (predictionHistory - predictAdjust)/ratio;
+        telemetry.addData("rightBias:", "" + rightBias);
+        float l_left_drive_power = speed + rightBias;
+        //= (float) scale_motor_power(speed + rightBias);
+        float l_right_drive_power = speed - rightBias;
+        //= (float) scale_motor_power(speed - rightBias);
+        //telemetry.addData("s, t = ", "" + speed + ", " + turn);
+        telemetry.addData("Powers: ", "" + l_left_drive_power + " : " + l_right_drive_power);
         set_drive_power(l_left_drive_power, l_right_drive_power);
+
+
 
 
     }
@@ -223,6 +264,7 @@ public class VisionGather extends LinearOpMode{
                 Utils.matToBitmap(cvColorImage, cvBitmap);
                 cvLayout.setImageBitmap(cvBitmap);
             }
+            telemetry.addData("model", model == null ? "null" : model.hello());
         }
     };
 
@@ -232,7 +274,7 @@ public class VisionGather extends LinearOpMode{
      *
      * OpenCV stuff can't be done on the UI (main) thread. Must be done on a background thread.
      */
-    public static class OpenCVSetup extends AsyncTask<Void, Void, Void> {
+    public class OpenCVSetup extends AsyncTask<Void, Void, Void> {
         @Override
         protected Void doInBackground(Void... params) {
             cvOrigImage = new Mat(160, 240, CvType.CV_8UC4);
@@ -240,8 +282,8 @@ public class VisionGather extends LinearOpMode{
             cvColorImage   = new Mat(240, 160, CvType.CV_8UC4);
             cvLastImage   = new Mat(240, 160, CvType.CV_8UC1);
             cvWorkingImage   = new Mat(240, 160, CvType.CV_8UC4);
-            toPoints   = initPoints(cvWorkingImage.width(), cvWorkingImage.height(), 10);
-            fromPoints = initPoints(cvWorkingImage.width(), cvWorkingImage.height(), 20);
+            toPoints   = initPoints(cvWorkingImage.width(), cvWorkingImage.height(), 40);
+            fromPoints = initPoints(cvWorkingImage.width(), cvWorkingImage.height(), 40);
 
             // Build a kernel
             int N = 3;
@@ -264,87 +306,74 @@ public class VisionGather extends LinearOpMode{
      *
      * OpenCV stuff can't be done on the UI (main) thread. Must be done on a background thread.
      */
-    public static class OpenCVProcess extends AsyncTask<Void, Void, Void> {
+    public class OpenCVProcess extends AsyncTask<Void, Void, Void> {
         @Override
         protected Void doInBackground(Void... params) {
             // Orient the image properly
-            if(CVImageProcessingFlag == true || lookState == DONELEFT || lookState == DONERIGHT) {
-                cvColorImage = null;
-                return null;
-            }
-            CVImageProcessingFlag = true;
 
             Imgproc.cvtColor(cvOrigImage, cvBWImage, Imgproc.COLOR_BGR2GRAY);
             Imgproc.equalizeHist(cvBWImage, cvBWImage);
 
+            // Rotate the image
             Core.transpose(cvBWImage, cvBWImage);
             Core.flip(cvBWImage, cvBWImage, 1);
+            Imgproc.filter2D(cvBWImage, cvBWImage, -1, kernel1);
 
-            // Compute the flow
-            MatOfByte flowStatus = new MatOfByte();
-            MatOfFloat err = new MatOfFloat();
-            Video.calcOpticalFlowPyrLK(cvLastImage, cvBWImage, fromPoints, toPoints, flowStatus, err);
-
-            Imgproc.cvtColor(cvBWImage, cvWorkingImage, Imgproc.COLOR_GRAY2BGRA);
-            Point[] fpArray = fromPoints.toArray();
-            Point[] tpArray = toPoints.toArray();
-            float[] eArray = err.toArray();
-            byte[]  b = flowStatus.toArray();
-
-            // Bins to hold segment lengths
-            ArrayList<ArrayList<Integer>> bins = new ArrayList<ArrayList<Integer>> ();
-            int numBins = 3;
-            for(int i = 0; i < numBins; i++)
-                bins.add(new ArrayList<Integer>());
-
-            for(int i = 0; i < fpArray.length; i++){
-                if(b[i] == 1 && dist(fpArray[i], tpArray[i]) < 20) {
-                    // draw the segment to the screen
-                    Imgproc.line(cvWorkingImage, fpArray[i], tpArray[i], new Scalar(255, 0, 255));
-                    // Place the segment into the appropriate bin
-                    int binNumber = (int)(fpArray[i].x * numBins) / cvWorkingImage.cols();
-                    bins.get(binNumber).add((int)dist(fpArray[i], tpArray[i]));
-                }
+            // Compute the column sums
+            int cols = cvBWImage.cols();
+            float[] featureVector = new float[cols];
+            for(int j = 0; j < cols; j++){
+                float sum = 0.0f;
+                for(int i = 0; i < cvBWImage.rows(); i++)
+                    sum += cvBWImage.get(i, j)[0];
+                featureVector[j] = sum * 213.0f/240.0f;
             }
 
-            // Now compute how to turn based on the bin
-            int maxi = -1;
-            double maxSum = -1;
-            for(int i = 0; i < numBins; i++) {
-                int numEntries = bins.get(i).size();
-                double sum = 0;
-                for (int j = 0; j < numEntries; j++) {
-                    sum += bins.get(i).get(j);
-                }
-                if (sum > 0)
-                    sum /= numEntries;
-                globalSum[i] = sum;
+            Imgproc.cvtColor(cvBWImage, cvColorImage, Imgproc.COLOR_GRAY2BGRA);
+            int prediction = model.predict(featureVector);
+            Imgproc.putText(cvColorImage, String.valueOf(prediction),
+                    new Point(20, 120),
+                    Core.FONT_HERSHEY_TRIPLEX, 2.0, new Scalar(0, 255, 0));
 
-                if (sum > maxi) {
-                    maxSum = sum;
-                    maxi = i;
+            String[] predString = {"Stop", "Hard Left", "Left", "Forward", "Right", "Hard Right"};
+            telemetry.addData("prediction:", predString[prediction]);
+            if(prediction != 0)
+                predictionHistory = MEMORY * predictionHistory + (1-MEMORY) * prediction;
+
+            // Manage the prediction queue
+            if(predictionQueue != null) {
+                predictionQueue.add(prediction);
+                if (predictionQueue.size() >= QSIZE) {
+                    String telstr = "";
+                    int l = 0, f = 0, r = 0;
+                    for (int p : predictionQueue) {
+                        if (p == 1 || p == 2) l++;
+                        if (p == 3) f++;
+                        if (p == 4 || p == 5) r++;
+                        telstr = telstr + p;
+                    }
+                    int thresh = 2;
+                    if (l > f + thresh && l > r + thresh)
+                        predictionHistory = 2;
+                    else if (r > f + thresh && r > l + thresh)
+                        predictionHistory = 4;
+                    else
+                        predictionHistory = 3;
+
+                    telemetry.addData("Q:", telstr);
+                    predictionQueue.removeFirst();
                 }
             }
-
-            leftVal = 80 + (1-maxi) * 60;
-            Log.d("leftVal", "" + leftVal);
-
-            cvColorImage = cvWorkingImage;
-
-            cvLastImage = cvBWImage.clone();
-
-            if(lookState == LOOKLEFT) lookState = DONELEFT;
-            if(lookState == LOOKRIGHT) lookState = DONERIGHT;
-            nextTime = System.currentTimeMillis() + 500;
-
-            CVImageProcessingFlag = false;
-
             return null;
         }
     }
 
+    private static double xdist(Point p1, Point p2){
+        return Math.abs(p1.x - p2.x);
+    }
+
     private static double dist(Point p1, Point p2){
-        return Math.sqrt((p1.x - p2.x)*(p1.x - p2.x) + (p1.y - p2.y)*(p1.y - p2.y));
+        return Math.sqrt((p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y));
     }
 
     /**
@@ -514,6 +543,184 @@ public class VisionGather extends LinearOpMode{
         }
     };
 
+
+    public class MyModel{
+        private float[][][] weights;
+        private float[][]   biases;
+        private float[]      means;  // For each input node
+        private float[]    stddevs;  // For each input node
+        private int      numInputs;  // size of the input layer
+
+        int numLayers = 0;
+        String helloString = "0";
+        private boolean initialized = false;
+
+        /**
+         * Constructor, takes an array of the sizes of all node levels, including in and out.
+         *
+         * @param sizes
+         */
+        public MyModel(int[] sizes){
+            numLayers = sizes.length;
+            numInputs = sizes[0];
+
+            weights = new float[numLayers-1][][];
+            for(int i = 0; i < numLayers-1; i++){
+                weights[i] = new float[sizes[i+1]][sizes[i]];
+            }
+
+            biases = new float[numLayers][];
+            for(int i = 1; i < numLayers; i++)
+                biases[i] = new float[sizes[i]];
+
+            means   = new float[numInputs];
+            stddevs = new float[numInputs];
+            helloString += ".i";
+        }
+
+        /**
+         * Read the plain coefficient file and fill the weights
+         * @param rawid  An ID for the weights resource in the raw file
+         */
+        public void read(int rawid){
+            Resources res = hardwareMap.appContext.getResources();
+            try {
+                DataInputStream dis = new DataInputStream(res.openRawResource(rawid));
+                for(int level = 0; level < numLayers-1; level++){
+                    for(int i = 0; i < weights[level].length; i++){
+                        for(int j = 0; j < weights[level][i].length; j++){
+                            weights[level][i][j] = dis.readFloat();
+                        }
+                    }
+                    for(int i = 0; i < weights[level].length; i++){
+                        biases[level+1][i] = dis.readFloat();
+                    }
+
+                }
+                helloString += ".r";
+            } catch (FileNotFoundException e) {
+                e.printStackTrace();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
+        /**
+         * Read the CSV file containing means and standard deviations
+         * @param rawid  An ID for the CSV resource in the raw file
+         */
+        public void setMeanAndDev(int rawid){
+            Resources res = hardwareMap.appContext.getResources();
+            try {
+                BufferedReader reader = new BufferedReader(new InputStreamReader(
+                        res.openRawResource(rawid)));
+                String line = reader.readLine();
+                String[] m = line.split(",");
+                line = reader.readLine();
+                String[] d = line.split(",");
+                for(int i = 0; i < numInputs; i++){
+                    means[i] = Float.valueOf(m[i]);
+                    stddevs[i] = Float.valueOf(d[i]);
+                }
+                helloString += ".ms";
+                initialized = true;
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+
+        }
+
+
+        /**
+         * Reads data from a csv file of image data and predicts the value.
+         *
+         * @param filename
+         */
+        public void verify(String filename){
+            float[] ins = new float[numInputs];
+
+            try {
+                FileReader f = new FileReader(filename);
+                BufferedReader reader = new BufferedReader(f);
+                for(int t = 0; t < 500; t++){
+                    String line = reader.readLine();
+                    String[] m = line.split(",");
+                    for(int i = 0; i < numInputs; i++){
+                        ins[i] = Float.valueOf(m[i]);
+                    }
+                    //for(int i = numInputs - 10; i < numInputs; i++)
+                    //	System.out.print(ins[i] + " ");
+                    int prediction = predict(ins);
+                    System.out.println(prediction);
+                }
+
+            } catch (IOException e) {
+                // TODO Auto-generated catch block
+                e.printStackTrace();
+            }
+
+
+        }
+
+        /**
+         * Takes an array for input into the network, and returns the predicted class
+         *
+         * @param inputs
+         * @return the index of the predicted class
+         */
+        public int predict(float[] inputs){
+            // Initialize propagation values
+            float[][] props = new float[numLayers][];
+            props[0] = inputs;
+            // Normalize input
+            for(int i = 0; i < numInputs; i++)
+                inputs[i] = (inputs[i] - means[i]) / stddevs[i];
+            for(int i = 1; i < numLayers; i++)
+                props[i] = new float[weights[i-1].length];
+
+            // Propagate
+            for(int layer = 1; layer < numLayers; layer++){
+                for(int i = 0; i < weights[layer-1].length; i++){
+                    props[layer][i] = biases[layer][i];
+                    for(int j = 0; j < weights[layer-1][i].length; j++)
+                        props[layer][i] += props[layer-1][j] * weights[layer-1][i][j];
+                    props[layer][i] = (float) Math.tanh(props[layer][i]);
+                }
+            }
+
+            // Select the greatest value on the output layer
+            float max = props[numLayers - 1][0];
+            int maxidx = 0;
+            for(int i = 1; i < weights[numLayers - 2].length; i++){
+                if(props[numLayers - 1][i] > max){
+                    max = props[numLayers - 1][i];
+                    maxidx = i;
+                }
+            }
+            return maxidx;
+        }
+
+
+        /**
+         * Returns a string indicating finished-ness statuses
+         *
+         * @return String where 0="started", i="initialized", r="read weights", ms = "read means and stddevs"
+         */
+        public String hello(){
+            return helloString;
+        }
+
+        /**
+         * Tells whether the model is finished with initialization
+         *
+         * @return True when all files have been read and processed
+         */
+        public boolean isInitialized(){
+            return initialized;
+        }
+    }
+
+
 /*
 
 
@@ -582,9 +789,171 @@ public static class OpenCVProcess extends AsyncTask<Void, Void, Void> {
 
     /**
      *
-     */
-    void processModel(MultiLayerNetwork model){
+     *
 
-	}
+     void processModel(){
+     MultiLayerConfiguration confFromJson = null;
+
+
+     Resources res = hardwareMap.appContext.getResources();
+     InputStream is = res.openRawResource(R.raw.conf);
+
+     Writer writer = new StringWriter();
+     char[] buffer = new char[1024];
+     try {
+     Reader reader = new BufferedReader(new InputStreamReader(is, "UTF-8"));
+     int n;
+     while ((n = reader.read(buffer)) != -1) {
+     writer.write(buffer, 0, n);
+     }
+     } catch (UnsupportedEncodingException e) {
+     e.printStackTrace();
+     } catch (IOException e) {
+     e.printStackTrace();
+     } finally {
+     try {
+     is.close();
+     } catch (IOException e) {
+     e.printStackTrace();
+     }
+     }
+
+     String jsonString = writer.toString();
+     //confFromJson = MultiLayerConfiguration.fromJson(jsonString);
+
+     //Load parameters from disk:
+     JavaNDArray newParams = null;
+     float[] x = new float[1917606];
+     try {
+     DataInputStream dis = new DataInputStream(res.openRawResource(R.raw.coeffplain));
+     for(int i = 0; i < 1917606; i++)
+     x[i] = dis.readFloat();
+     newParams = new JavaNDArray(x);
+
+     } catch (FileNotFoundException e) {
+     e.printStackTrace();
+     } catch (IOException e) {
+     e.printStackTrace();
+     }
+
+     //Create a MultiLayerNetwork from the saved configuration and parameters
+     MultiLayerNetwork model = new MultiLayerNetwork(confFromJson);
+     model.init();
+     model.setParameters(newParams);
+     }
+
+
+
+     // Compute the flow
+     MatOfByte flowStatus = new MatOfByte();
+     MatOfFloat err = new MatOfFloat();
+     Video.calcOpticalFlowPyrLK(cvLastImage, cvBWImage, fromPoints, toPoints, flowStatus, err);
+
+     Imgproc.cvtColor(cvBWImage, cvWorkingImage, Imgproc.COLOR_GRAY2BGRA);
+     Point[] fpArray = fromPoints.toArray();
+     Point[] tpArray = toPoints.toArray();
+     float[] eArray = err.toArray();
+     byte[]  b = flowStatus.toArray();
+
+     // Bins to hold segment lengths
+     ArrayList<ArrayList<Integer>> bins = new ArrayList<ArrayList<Integer>> ();
+     int numBins = 3;
+     for(int i = 0; i < numBins; i++)
+     bins.add(new ArrayList<Integer>());
+
+     for(int i = 0; i < fpArray.length; i++){
+     double distance = dist(fpArray[i], tpArray[i]);
+     if(b[i] == 1 && distance > -1 && distance < 30) {
+     // draw the segment to the screen
+     Imgproc.line(cvWorkingImage, fpArray[i], tpArray[i], new Scalar(255, 0, 255));
+     // Place the segment into the appropriate bin
+     int binNumber = (int)(fpArray[i].x * numBins) / cvWorkingImage.cols();
+     bins.get(binNumber).add((int)xdist(fpArray[i], tpArray[i]));
+     }
+     }
+
+     // Now compute how to turn based on the bins
+     int maxi = -1;
+     double maxSum = -1;
+     for(int i = 0; i < numBins; i++) {
+     int numEntries = bins.get(i).size();
+     double sum = 0;
+     for (int j = 0; j < numEntries; j++) {
+     sum += bins.get(i).get(j);
+     }
+     if (sum > 0)
+     sum /= numEntries;
+     globalSum[i] = sum;
+     }
+
+     // Now set leftVal for turning. 80 = straight, less = left (maybe...)
+     targetXval = 80;
+
+     if(turnState == NOT_TURNING) {
+     double factorThresh = 1.2;
+     double minThresh = 2;
+     if (globalSum[0] > minThresh && globalSum[0] > factorThresh * globalSum[1] && globalSum[0] > factorThresh * globalSum[2])
+     targetXval = 140;
+     if (globalSum[2] > minThresh && globalSum[2] > factorThresh * globalSum[1] && globalSum[2] > factorThresh * globalSum[0])
+     targetXval = 20;
+     }
+
+     if(targetXval != 80)
+     turnState = TURNING;
+     else
+     turnState = NOT_TURNING;
+
+     Log.d("leftVal", "" + targetXval);
+
+     cvColorImage = cvWorkingImage;
+     cvLastImage = cvBWImage.clone();
+
+     CVImageProcessingFlag = false;
+
+
+
+     telemetry.addData("left", globalSum[0]);
+     telemetry.addData("middle", globalSum[1]);
+     telemetry.addData("right", globalSum[2]);
+     telemetry.addData("longestLines", largestVal(globalSum[0], globalSum[1], globalSum[2]));
+
+
+
+
+
+     /**
+     * Mode for using one joystick
+     *
+     private void doGoToTheLightDrive() {
+     telemetry.addData("targetXval:", "" + targetXval);
+
+     float speed = 0.3f;
+     float rightBias  = (targetXval - 80.0f)/600.0f;
+     float l_left_drive_power
+     = (float) scale_motor_power(speed + rightBias);
+     float l_right_drive_power
+     = (float) scale_motor_power(speed - rightBias);
+     //telemetry.addData("s, t = ", "" + speed + ", " + turn);
+     telemetry.addData("Powers: ", "" + l_left_drive_power + ":" + l_right_drive_power);
+     set_drive_power(l_left_drive_power, l_right_drive_power);
+
+
+     }
+
+
+
+
+     private String largestVal(double l, double c, double r){
+     if(l > c && l > r){
+     return "left";
+     }else if(r > c)
+     return "right";
+     else
+     return "center";
+     }
+
+
+
+     */
 
 }

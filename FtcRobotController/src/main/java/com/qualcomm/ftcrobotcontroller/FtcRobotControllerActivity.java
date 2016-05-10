@@ -286,6 +286,11 @@ public class FtcRobotControllerActivity extends Activity {
   @Override
   public void onPause() {
     super.onPause();
+    if (camera != null) {
+        camera.stopPreview();
+        camera.release();
+        camera = null;
+    }
   }
 
   @Override
