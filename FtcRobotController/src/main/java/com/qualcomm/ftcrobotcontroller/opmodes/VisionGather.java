@@ -73,19 +73,19 @@ public class VisionGather extends LinearOpMode{
     Servo  ServoA1, ServoA2;
 
     /* Camera fields */
-    private Camera camera;
+    protected Camera camera;
     public CameraPreview preview;
     public Bitmap image;
-    private int width;
-    private int height;
-    private YuvImage yuvImage = null;
-    private int looped = 0;
-    private String data;
+    protected int width;
+    protected int height;
+    protected YuvImage yuvImage = null;
+    protected int looped = 0;
+    protected String data;
 
     // Neural Net fields
     MyModel model = null;
     float predictionHistory = 3.0f;
-    float MEMORY = 0.3f;
+    float MEMORY = 0.0f;
     int   QSIZE  = 11;
     LinkedList<Integer> predictionQueue;
 
@@ -104,7 +104,7 @@ public class VisionGather extends LinearOpMode{
     static double[] globalSum;
 
     /* Adjustable fields */
-    float predictAdjust = 0.0f;
+    float predictAdjust = 3.0f;
     float ratio = 10f;
     static enum Field {
         PREDICTADJUST, RATIO, MEMORY
@@ -223,7 +223,7 @@ public class VisionGather extends LinearOpMode{
         telemetry.addData("history:", "" + predictionHistory);
 
         float speed = 0.3f;
-        float rightBias  = (predictionHistory - predictAdjust)/ratio;
+        float rightBias  = .05f + (predictionHistory - predictAdjust)/ratio;
         telemetry.addData("rightBias:", "" + rightBias);
         float l_left_drive_power = speed + rightBias;
         //= (float) scale_motor_power(speed + rightBias);
